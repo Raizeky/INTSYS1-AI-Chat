@@ -271,7 +271,6 @@ IMPORTANT INSTRUCTIONS:
    - Requirements
    - Procedure
    - Fees
-   - Processing time
 
    Only include sections supported by the records.
 
