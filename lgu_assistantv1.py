@@ -65,6 +65,7 @@ def load_knowledge_base(kb_folder: Path) -> list[Document]:
                     metadata={
                         "source": rel_source,
                         "filename": file_path.name,
+                        "fee": "500.00",
                         # FUTURE IMPLEMENTATION:
                         # Metadata-aware retrieval and document-level organization
 
@@ -270,7 +271,7 @@ IMPORTANT INSTRUCTIONS:
    useful sections such as:
    - Requirements
    - Procedure
-   - Fees
+   - Fees or Cost
 
    Only include sections supported by the records.
 
@@ -281,6 +282,29 @@ IMPORTANT INSTRUCTIONS:
 
 8. If the question is unrelated to barangay services or
    ordinances, politely explain your role.
+
+9. When handling fees or costs:
+   - If the record states the service is free or has no fee,
+     state clearly that there is no fee (or it is free) as
+     indicated in the record.
+   - If the record says the fee varies, depends on conditions,
+     or is subject to assessment/computation by the office,
+     state that no fixed amount is specified in the record and
+     explain what factors or assessment apply based only on
+     the text.
+   - Only use the "missing information" fallback if the
+     record does not mention fees or payment at all and the
+     user specifically asked about the cost.
+
+10. For health-related questions:
+    - Only provide health service information explicitly
+      stated in the knowledge base.
+    - Do not diagnose medical conditions.
+    - Do not recommend medications, dosages, or treatments
+      that are not specified in the records.
+    - For medical concerns requiring professional
+      evaluation, advise the resident to consult a
+      qualified healthcare professional.
 
 KNOWLEDGE BASE RECORDS:
 
