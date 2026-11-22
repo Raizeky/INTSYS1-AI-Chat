@@ -1,4 +1,5 @@
-
+import re
+import random
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +22,103 @@ LLM_MODEL = "gemma3:4b"
 CHUNK_SIZE = 700
 CHUNK_OVERLAP = 100
 TOP_K = 5
+
+# If the best chunk scores below this, the question is probably off-topic.
+# Tune by testing a few off-topic queries and watching the printed scores.
+MIN_SIMILARITY = 0.20
+
+# Messages longer than this are treated as real questions, not small talk
+SMALL_TALK_MAX_WORDS = 7
+
+
+# ============================================================
+# SMALL TALK HANDLING
+# ============================================================
+
+SMALL_TALK_RULES = [
+    {
+        "name": "thanks",
+        "patterns": [
+            r"thank(s| you| u)?\b",
+            r"salamat\b",
+            r"maraming salamat\b",
+            r"agyamanak\b",          # Ilocano
+            r"appreciate (it|that|your help)\b",
+            r"great,? thanks\b",
+        ],
+        "responses": [
+            "You're welcome! Let me know if you have other questions about barangay services or ordinances.",
+            "Walang anuman! Feel free to ask if you need help with anything else.",
+            "Happy to help! Ask me anytime about barangay services or ordinances.",
+        ],
+    },
+    {
+        "name": "greeting",
+        "patterns": [
+            r"(hi|hello|hey|good (morning|afternoon|evening))\b",
+            r"kumusta\b",
+            r"magandang (umaga|hapon|gabi|araw)\b",
+        ],
+        "responses": [
+            "Hello! I'm the Barangay Services and Ordinance Information Assistant. How can I help you today?",
+        ],
+    },
+    {
+        "name": "goodbye",
+        "patterns": [
+            r"(bye|goodbye|see you|see ya)\b",
+            r"paalam\b",
+            r"sige na\b",
+        ],
+        "responses": [
+            "Goodbye! Feel free to come back if you have more questions.",
+        ],
+    },
+    {
+        "name": "acknowledgement",
+        "patterns": [
+            r"(ok|okay|okey|got it|noted|i see|alright|sige)[.!\s]*$",
+        ],
+        "responses": [
+            "Great! Let me know if there's anything else you'd like to ask.",
+        ],
+    },
+]
+
+QUESTION_WORDS = (
+    "how", "what", "where", "when", "who", "why", "which",
+    "magkano", "paano", "saan", "kailan", "ano", "sino",
+    "fee", "requirement", "requirements", "procedure",
+)
+
+
+def handle_small_talk(query: str) -> str | None:
+    """
+    Returns a canned reply if the message is pure small talk,
+    otherwise None (meaning: run the normal RAG pipeline).
+    """
+
+    text = query.lower().strip()
+    text = re.sub(r"[^\w\s]", "", text)   # strip punctuation
+
+    if not text:
+        return None
+
+    # Long messages are real questions, e.g.
+    # "thank you, but how much is the clearance fee?"
+    if len(text.split()) > SMALL_TALK_MAX_WORDS:
+        return None
+
+    # Question-like words mean the user wants a real answer
+    if any(re.search(rf"\b{w}\b", text) for w in QUESTION_WORDS):
+        return None
+
+    for rule in SMALL_TALK_RULES:
+        for pattern in rule["patterns"]:
+            if re.match(rf"^\s*({pattern})", text):
+                return random.choice(rule["responses"])
+
+    return None
 
 
 # ============================================================
@@ -93,7 +191,6 @@ if not raw_docs:
 print(f"\nTotal documents loaded: {len(raw_docs)}")
 
 
-
 # ============================================================
 # 3. SPLIT DOCUMENTS INTO SERVICE-BASED CHUNKS
 # ============================================================
@@ -114,8 +211,6 @@ for doc in raw_docs:
 
     # Special handling for Katarungang Pambarangay
     if "09_Katarungang_Pambarangay" in source:
-
-        import re
 
         # Identify the main service headings
         pattern = r"(?=^[ \t]*[A-D]\.\s+)"
@@ -164,7 +259,6 @@ if not chunks:
 print(f"Total chunks generated: {len(chunks)}")
 
 
-
 # ============================================================
 # 4. LOAD EMBEDDING MODEL
 # ============================================================
@@ -198,8 +292,9 @@ doc_vectors_norm = doc_vectors / (
 
 print("Document embeddings generated successfully.")
 
+
 # ============================================================
-# 5. Remove or prevent duplicate retrieval
+# 5. REMOVE DUPLICATE CHUNKS
 # ============================================================
 
 def remove_duplicate_chunks(docs):
@@ -217,8 +312,9 @@ def remove_duplicate_chunks(docs):
 
     return unique_docs
 
+
 # ============================================================
-# 5. RETRIEVE TOP-K RELEVANT DOCUMENTS
+# 6. RETRIEVE TOP-K RELEVANT DOCUMENTS
 # ============================================================
 
 def retrieve_top_k(
@@ -273,16 +369,11 @@ def retrieve_top_k(
 
 
 # ============================================================
-# 6. INITIALIZE OLLAMA LLM
+# 7. INITIALIZE OLLAMA LLM
 # ============================================================
 
 print("\nConnecting to Ollama...")
 
-#llm = ChatOllama(
-#    model=LLM_MODEL,
-#    temperature=0,
-#    num_ctx=2048
-#)
 llm = ChatOllama(
     model=LLM_MODEL,
     temperature=0,
@@ -290,13 +381,11 @@ llm = ChatOllama(
     num_predict=1024
 )
 
-
-
 print("Ollama connected successfully.")
 
 
 # ============================================================
-# 7. BUILD CONTEXT WITH SOURCE INFORMATION
+# 8. BUILD CONTEXT WITH SOURCE INFORMATION
 # ============================================================
 
 def build_context(
@@ -328,7 +417,7 @@ Content:
 
 
 # ============================================================
-# 8. GENERATE ANSWER
+# 9. GENERATE ANSWER
 # ============================================================
 
 def generate_answer(
@@ -562,7 +651,7 @@ STRICT ANSWERING RULES:
     the retrieved knowledge, state that the information
     could not be found.
 
-      
+
 KNOWLEDGE BASE RECORDS:
 
 {context}
@@ -580,8 +669,16 @@ ANSWER:
 
 
 # ============================================================
-# 9. INTERACTIVE RAG CHAT
+# 10. INTERACTIVE RAG CHAT
 # ============================================================
+
+def print_response(text: str):
+    print("\n" + "=" * 60)
+    print("ASSISTANT RESPONSE")
+    print("=" * 60)
+    print(text)
+    print("\n" + "-" * 60)
+
 
 def main():
 
@@ -607,9 +704,18 @@ def main():
                 continue
 
             if query.lower() in {"exit", "quit", "q"}:
-
                 print("\nExiting assistant.")
                 break
+
+            # ------------------------------------------------
+            # SMALL TALK (skips retrieval and the LLM entirely)
+            # ------------------------------------------------
+
+            small_talk_reply = handle_small_talk(query)
+
+            if small_talk_reply:
+                print_response(small_talk_reply)
+                continue
 
             # ------------------------------------------------
             # RETRIEVE DOCUMENTS
@@ -621,8 +727,6 @@ def main():
                 query,
                 k=TOP_K
             )
-
-            top_chunks = remove_duplicate_chunks(top_chunks)
 
             if not top_chunks:
                 print("No relevant records found.")
@@ -654,6 +758,20 @@ def main():
                 print("-" * 50)
 
             # ------------------------------------------------
+            # OFF-TOPIC GUARD (low similarity = not about barangay)
+            # ------------------------------------------------
+
+            best_score = top_chunks[0].metadata.get("similarity_score", 0)
+
+            if best_score < MIN_SIMILARITY:
+                print_response(
+                    "I'm sorry, I can only help with barangay services "
+                    "and ordinances. Is there something about those "
+                    "I can help you with?"
+                )
+                continue
+
+            # ------------------------------------------------
             # GENERATE ANSWER
             # ------------------------------------------------
 
@@ -664,13 +782,7 @@ def main():
                 top_chunks
             )
 
-            print("\n" + "=" * 60)
-            print("ASSISTANT RESPONSE")
-            print("=" * 60)
-
-            print(answer)
-
-            print("\n" + "-" * 60)
+            print_response(answer)
 
         except KeyboardInterrupt:
 
@@ -683,7 +795,7 @@ def main():
 
 
 # ============================================================
-# 10. RUN APPLICATION
+# 11. RUN APPLICATION
 # ============================================================
 
 if __name__ == "__main__":
